@@ -1,0 +1,86 @@
+import rclpy
+from rclpy.action import ActionClient
+from rclpy.node import Node
+
+from trajectory_msgs.msg import JointTrajectoryPoint
+from control_msgs.action import FollowJointTrajectory
+
+
+class UR10eJointController(Node):
+    def __init__(self):
+        super().__init__("ur10e_joint_controller")
+
+        self.action_client = ActionClient(
+            self,
+            FollowJointTrajectory,
+            "/scaled_joint_trajectory_controller/follow_joint_trajectory"
+        )
+
+        self.joint_names = [
+            "shoulder_pan_joint",
+            "shoulder_lift_joint",
+            "elbow_joint",
+            "wrist_1_joint",
+            "wrist_2_joint",
+            "wrist_3_joint",
+        ]
+
+    def send_goal(self):
+        self.get_logger().info("Waiting for trajectory action server...")
+
+        self.action_client.wait_for_server()
+
+        goal_msg = FollowJointTrajectory.Goal()
+        goal_msg.trajectory.joint_names = self.joint_names
+
+        point = JointTrajectoryPoint()
+
+        # 目标关节角，单位是弧度
+        # 这只是 fake hardware 测试动作，不要直接用于真机
+        point.positions = [
+            0.0,
+            -1.57,
+            1.57,
+            -1.57,
+            -1.57,
+            0.0,
+        ]
+
+        point.time_from_start.sec = 5
+        point.time_from_start.nanosec = 0
+
+        goal_msg.trajectory.points.append(point)
+
+        self.get_logger().info("Sending joint trajectory goal...")
+        future = self.action_client.send_goal_async(goal_msg)
+        future.add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+
+        if not goal_handle.accepted:
+            self.get_logger().error("Goal rejected.")
+            rclpy.shutdown()
+            return
+
+        self.get_logger().info("Goal accepted.")
+        result_future = goal_handle.get_result_async()
+        result_future.add_done_callback(self.result_callback)
+
+    def result_callback(self, future):
+        result = future.result().result
+        self.get_logger().info(f"Trajectory finished with error_code: {result.error_code}")
+        rclpy.shutdown()
+
+
+def main():
+    rclpy.init()
+
+    node = UR10eJointController()
+    node.send_goal()
+
+    rclpy.spin(node)
+
+
+if __name__ == "__main__":
+    main()
